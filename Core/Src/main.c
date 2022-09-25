@@ -35,8 +35,8 @@
 /* USER CODE BEGIN PD */
 #define UART_TX_TIMEOUT				100
 #define UART_RX_TIMEOUT				300
-#define UART_RX_BUFF_SIZE			99
-#define UART_TX_BUFF_SIZE			99
+#define UART_RX_MAX_BUFF_SIZE		99
+#define UART_TX_MAX_BUFF_SIZE		99
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -269,14 +269,16 @@ static void MX_GPIO_Init(void)
   */
 uint8_t send2uart ( UART_HandleTypeDef* huart , const char* at_command2send , const char* expected_at_answer )
 {
-	char* uart_rx_buff = malloc ( 99 * sizeof (char) ) ;
-	char* uart_tx_buff = malloc ( 99 * sizeof (char) ) ;
 	uint8_t is_expected_at_answer ;
+	char* uart_rx_buff = malloc ( (UART_RX_MAX_BUFF_SIZE + 1 ) * sizeof (char) ) ; //+1 for the null byte at the end of string
+	char* uart_tx_buff = malloc ( (UART_TX_MAX_BUFF_SIZE + 1 ) * sizeof (char) ) ; //+1 for the null byte at the end of string
+	if ( uart_rx_buff == NULL || uart_tx_buff == NULL )
+		exit ( 1 ) ; //Out heap memory
 
 	sprintf ( uart_tx_buff , "%s" , at_command2send ) ;
 	__HAL_UART_SEND_REQ ( huart , UART_RXDATA_FLUSH_REQUEST ) ; //https://community.st.com/s/question/0D53W00000oXKU2SAO/efficient-way-to-process-usartreceived-data-and-flush-rx-buffer-
 	uart_status = HAL_UART_Transmit ( huart , (uint8_t *) uart_tx_buff ,  strlen ( uart_tx_buff ) , UART_TX_TIMEOUT ) ;
-	uart_status = HAL_UART_Receive ( huart , (uint8_t *) uart_rx_buff , UART_RX_BUFF_SIZE , UART_RX_TIMEOUT ) ;
+	uart_status = HAL_UART_Receive ( huart , (uint8_t *) uart_rx_buff , UART_RX_MAX_BUFF_SIZE , UART_RX_TIMEOUT ) ;
 	sprintf ( uart_tx_buff , "Answer %s" , uart_rx_buff ) ;
 	uart_status = HAL_UART_Transmit ( huart , (uint8_t *) uart_tx_buff ,  (uint16_t) strlen ( uart_tx_buff ) , UART_TX_TIMEOUT ) ;
 	if ( strncmp ( uart_rx_buff , expected_at_answer , strlen ( expected_at_answer ) ) == 0 )
