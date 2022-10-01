@@ -33,10 +33,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define UART_HANDLER				&huart2
 #define UART_TX_TIMEOUT				100
 #define UART_RX_TIMEOUT				300
-#define UART_RX_MAX_BUFF_SIZE		99
-#define UART_TX_MAX_BUFF_SIZE		99
+#define UART_RX_MAX_BUFF_SIZE		49
+#define UART_TX_MAX_BUFF_SIZE		49
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,14 +49,16 @@
 RTC_HandleTypeDef hrtc;
 
 UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 HAL_StatusTypeDef 					uart_status ;
 const char          				hello[] = "Hello! Test_Uart_009_L073RZ\n" ;
+const char 							nl = '\n' ;
 // SWARM AT Commands
 const char*							gn_mostrecent_at_comm = "$GN @*67\n" ;
 // SWARM AT Answers
-const char*         				gn_mostrecent_answer = "$GN 52.2782,20.8089,84,359,2*2b\n" ;
+const char*         				gn_mostrecent_answer = "$GN " ;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,8 +66,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 uint8_t								send2uart				( UART_HandleTypeDef* , const char* , const char* ) ;
+uint8_t								add_null_after_nl		( char* ) ;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -102,16 +107,19 @@ int main(void)
   MX_GPIO_Init();
   MX_RTC_Init();
   MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Transmit ( &huart1 , (uint8_t*) hello , strlen ( hello ) , UART_TX_TIMEOUT ) ;
+  HAL_UART_Transmit ( UART_HANDLER , (uint8_t*) hello , strlen ( hello ) , UART_TX_TIMEOUT ) ;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  send2uart ( &huart1 , gn_mostrecent_at_comm , gn_mostrecent_answer ) ;
+	  send2uart ( UART_HANDLER , gn_mostrecent_at_comm , gn_mostrecent_answer ) ;
 	  HAL_Delay ( 3000 ) ;
+	  HAL_PWR_EnterSTANDBYMode () ;
+	  //HAL_PWR_EnterSTOPMode ( PWR_LOWPOWERREGULATOR_ON , PWR_STOPENTRY_WFI ) ;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -165,8 +173,10 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_RTC;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_USART2
+                              |RCC_PERIPHCLK_RTC;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
+  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSE;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -201,6 +211,13 @@ static void MX_RTC_Init(void)
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
   hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
   if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Enable the WakeUp
+  */
+  if (HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 10, RTC_WAKEUPCLOCK_CK_SPRE_16BITS) != HAL_OK)
   {
     Error_Handler();
   }
@@ -246,6 +263,41 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -270,25 +322,72 @@ static void MX_GPIO_Init(void)
 uint8_t send2uart ( UART_HandleTypeDef* huart , const char* at_command2send , const char* expected_at_answer )
 {
 	uint8_t is_expected_at_answer ;
-	char* uart_rx_buff = malloc ( (UART_RX_MAX_BUFF_SIZE + 1 ) * sizeof (char) ) ; //+1 for the null byte at the end of string
+	uint8_t i ;
+	char* nl_buff ;
+	char* uart_rx_buff = malloc ( ( UART_RX_MAX_BUFF_SIZE + 1 ) * sizeof (char) ) ; //+1 for the null byte at the end of string
 	char* uart_tx_buff = malloc ( (UART_TX_MAX_BUFF_SIZE + 1 ) * sizeof (char) ) ; //+1 for the null byte at the end of string
 	if ( uart_rx_buff == NULL || uart_tx_buff == NULL )
 		exit ( 1 ) ; //Out heap memory
 
+	for ( i = 0 ; i < 50 ; i++ ) // zamienić na zmienną
+	{
+		*(uart_rx_buff+i) = 0 ;
+		*(uart_tx_buff+i) = 0 ;
+	}
+
 	sprintf ( uart_tx_buff , "%s" , at_command2send ) ;
+
+	//strncpy ( uart_tx_buff , at_command2send , strlen ( at_command2send ) ) ;
+	uart_status = HAL_UART_Receive ( huart , (uint8_t *) uart_rx_buff , UART_RX_MAX_BUFF_SIZE , UART_RX_TIMEOUT ) ;
 	__HAL_UART_SEND_REQ ( huart , UART_RXDATA_FLUSH_REQUEST ) ; //https://community.st.com/s/question/0D53W00000oXKU2SAO/efficient-way-to-process-usartreceived-data-and-flush-rx-buffer-
 	uart_status = HAL_UART_Transmit ( huart , (uint8_t *) uart_tx_buff ,  strlen ( uart_tx_buff ) , UART_TX_TIMEOUT ) ;
+	*uart_rx_buff = 0 ;
 	uart_status = HAL_UART_Receive ( huart , (uint8_t *) uart_rx_buff , UART_RX_MAX_BUFF_SIZE , UART_RX_TIMEOUT ) ;
-	sprintf ( uart_tx_buff , "Answer %s" , uart_rx_buff ) ;
-	uart_status = HAL_UART_Transmit ( huart , (uint8_t *) uart_tx_buff ,  (uint16_t) strlen ( uart_tx_buff ) , UART_TX_TIMEOUT ) ;
+
+	//sprintf ( uart_tx_buff , "Answer %s" , uart_rx_buff ) ;
 	if ( strncmp ( uart_rx_buff , expected_at_answer , strlen ( expected_at_answer ) ) == 0 )
+	{
 		is_expected_at_answer = 1 ;
+		//add_null after nl to avoid problem when sending to UAR
+		nl_buff = strchr ( (const char*) uart_rx_buff , nl ) ;
+			if ( nl_buff != NULL )
+			{
+				*nl_buff = 0 ;
+				uart_status = HAL_UART_Transmit ( huart , (uint8_t *) uart_rx_buff ,  (uint16_t) strlen ( uart_rx_buff ) , UART_TX_TIMEOUT ) ;
+			}
+	}
 	else
 		is_expected_at_answer = 0 ;
 	free ( uart_rx_buff ) ;
 	free ( uart_tx_buff ) ;
 
 	return is_expected_at_answer ;
+}
+uint8_t add_null_after_nl ( char* buff )
+{
+	uint8_t added_null = 0 ;
+	char c = '\n' ;
+	char* nl ;
+	nl = strchr ( (const char*) buff , c ) ;
+	if ( nl != NULL )
+	{
+		nl[0] = 0 ;
+		added_null = 1 ;
+	}
+	else
+		added_null = 0 ;
+	/*
+	for ( i = 0 ; i < size ; i++ )
+	{
+		if ( buff[i] == "\n" )
+		{
+			buff[ i + 1 ] == 0 ;
+			added_null = 1 ;
+			break ;
+		}
+	}
+	*/
+	return added_null ;
 }
 /* USER CODE END 4 */
 
